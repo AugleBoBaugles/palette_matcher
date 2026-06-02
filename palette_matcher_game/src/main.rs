@@ -1,6 +1,7 @@
 use bevy::prelude::*;
-use bevy::ui::RelativeCursorPosition;
 use rand::Rng;
+
+const STEP: f32 = 0.05;
 
 fn main() {
     App::new()
@@ -10,7 +11,7 @@ fn main() {
         .add_systems(
             Update,
             (
-                (handle_start_button, handle_slider_input, handle_submit_button),
+                (handle_start_button, handle_slider_buttons, handle_submit_button),
                 (update_target_swatch, update_player_swatch, update_slider_fills, update_score_text),
             )
                 .chain(),
@@ -27,20 +28,16 @@ struct GameState {
 }
 
 #[derive(Component, Clone, Copy)]
-enum ColorChannel {
-    Red,
-    Green,
-    Blue,
-}
+enum ColorChannel { Red, Green, Blue }
+
+#[derive(Component)]
+struct SliderButton { channel: ColorChannel, delta: f32 }
 
 #[derive(Component)]
 struct TargetSwatch;
 
 #[derive(Component)]
 struct PlayerSwatch;
-
-#[derive(Component)]
-struct SliderTrack(ColorChannel);
 
 #[derive(Component)]
 struct SliderFill(ColorChannel);
@@ -68,83 +65,72 @@ fn setup(mut commands: Commands) {
             ..default()
         })
         .with_children(|root| {
-            // Score at the top
             root.spawn((Text::new("Score: 0"), ScoreText));
 
-            // Two swatches side by side
+            // Two swatches
             root.spawn(Node {
                 flex_direction: FlexDirection::Row,
                 column_gap: Val::Px(40.0),
                 ..default()
             })
             .with_children(|row| {
-                // Target swatch
-                row.spawn(Node {
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    row_gap: Val::Px(8.0),
-                    ..default()
-                })
-                .with_children(|col| {
-                    col.spawn(Text::new("Target"));
-                    col.spawn((
-                        Node {
-                            width: Val::Px(150.0),
-                            height: Val::Px(150.0),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
-                        TargetSwatch,
-                    ));
-                });
-
-                // Player swatch
-                row.spawn(Node {
-                    flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    row_gap: Val::Px(8.0),
-                    ..default()
-                })
-                .with_children(|col| {
-                    col.spawn(Text::new("Your Color"));
-                    col.spawn((
-                        Node {
-                            width: Val::Px(150.0),
-                            height: Val::Px(150.0),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.0, 0.0, 0.0)),
-                        PlayerSwatch,
-                    ));
-                });
+                for (label, is_target) in [("Target", true), ("Your Color", false)] {
+                    row.spawn(Node {
+                        flex_direction: FlexDirection::Column,
+                        align_items: AlignItems::Center,
+                        row_gap: Val::Px(8.0),
+                        ..default()
+                    })
+                    .with_children(|col| {
+                        col.spawn(Text::new(label));
+                        let mut swatch = col.spawn((
+                            Node {
+                                width: Val::Px(150.0),
+                                height: Val::Px(150.0),
+                                ..default()
+                            },
+                            BackgroundColor(Color::srgb(0.15, 0.15, 0.15)),
+                        ));
+                        if is_target {
+                            swatch.insert(TargetSwatch);
+                        } else {
+                            swatch.insert(PlayerSwatch);
+                        }
+                    });
+                }
             });
 
-            // RGB sliders
+            // RGB sliders: [-] [fill bar] [+]
             for (label, channel, fill_color) in [
-                ("R", ColorChannel::Red, Color::srgb(0.8, 0.2, 0.2)),
+                ("R", ColorChannel::Red,   Color::srgb(0.8, 0.2, 0.2)),
                 ("G", ColorChannel::Green, Color::srgb(0.2, 0.8, 0.2)),
-                ("B", ColorChannel::Blue, Color::srgb(0.2, 0.2, 0.9)),
+                ("B", ColorChannel::Blue,  Color::srgb(0.2, 0.2, 0.9)),
             ] {
                 root.spawn(Node {
                     flex_direction: FlexDirection::Row,
                     align_items: AlignItems::Center,
-                    column_gap: Val::Px(10.0),
+                    column_gap: Val::Px(8.0),
                     ..default()
                 })
                 .with_children(|row| {
                     row.spawn(Text::new(label));
+
+                    // Decrease button
                     row.spawn((
-                        Node {
-                            width: Val::Px(300.0),
-                            height: Val::Px(24.0),
-                            overflow: Overflow::clip(),
-                            ..default()
-                        },
-                        BackgroundColor(Color::srgb(0.2, 0.2, 0.2)),
-                        Interaction::default(),
-                        RelativeCursorPosition::default(),
-                        SliderTrack(channel),
+                        Button,
+                        Node { padding: UiRect::all(Val::Px(8.0)), ..default() },
+                        BackgroundColor(Color::srgb(0.3, 0.3, 0.3)),
+                        SliderButton { channel, delta: -STEP },
                     ))
+                    .with_children(|b| { b.spawn(Text::new("<")); });
+
+                    // Fill bar (visual only)
+                    row.spawn(Node {
+                        width: Val::Px(250.0),
+                        height: Val::Px(24.0),
+                        overflow: Overflow::clip(),
+                        ..default()
+                    })
                     .with_children(|track| {
                         track.spawn((
                             Node {
@@ -159,10 +145,19 @@ fn setup(mut commands: Commands) {
                             SliderFill(channel),
                         ));
                     });
+
+                    // Increase button
+                    row.spawn((
+                        Button,
+                        Node { padding: UiRect::all(Val::Px(8.0)), ..default() },
+                        BackgroundColor(Color::srgb(0.3, 0.3, 0.3)),
+                        SliderButton { channel, delta: STEP },
+                    ))
+                    .with_children(|b| { b.spawn(Text::new(">")); });
                 });
             }
 
-            // Start and Submit buttons
+            // Start / Submit buttons
             root.spawn(Node {
                 flex_direction: FlexDirection::Row,
                 column_gap: Val::Px(20.0),
@@ -171,38 +166,28 @@ fn setup(mut commands: Commands) {
             .with_children(|row| {
                 row.spawn((
                     Button,
-                    Node {
-                        padding: UiRect::all(Val::Px(14.0)),
-                        ..default()
-                    },
+                    Node { padding: UiRect::all(Val::Px(14.0)), ..default() },
                     BackgroundColor(Color::srgb(0.25, 0.55, 0.25)),
                     StartButton,
                 ))
-                .with_children(|b| {
-                    b.spawn(Text::new("Start"));
-                });
+                .with_children(|b| { b.spawn(Text::new("Start")); });
 
                 row.spawn((
                     Button,
-                    Node {
-                        padding: UiRect::all(Val::Px(14.0)),
-                        ..default()
-                    },
+                    Node { padding: UiRect::all(Val::Px(14.0)), ..default() },
                     BackgroundColor(Color::srgb(0.55, 0.25, 0.25)),
                     SubmitButton,
                 ))
-                .with_children(|b| {
-                    b.spawn(Text::new("Submit"));
-                });
+                .with_children(|b| { b.spawn(Text::new("Submit")); });
             });
         });
 }
 
 fn handle_start_button(
-    interaction_query: Query<&Interaction, (Changed<Interaction>, With<StartButton>)>,
+    query: Query<&Interaction, (Changed<Interaction>, With<StartButton>)>,
     mut game_state: ResMut<GameState>,
 ) {
-    for interaction in &interaction_query {
+    for interaction in &query {
         if *interaction == Interaction::Pressed {
             let mut rng = rand::rng();
             game_state.target = [rng.random(), rng.random(), rng.random()];
@@ -212,29 +197,27 @@ fn handle_start_button(
     }
 }
 
-fn handle_slider_input(
-    interaction_query: Query<(&Interaction, &RelativeCursorPosition, &SliderTrack)>,
+fn handle_slider_buttons(
+    query: Query<(&Interaction, &SliderButton), Changed<Interaction>>,
     mut game_state: ResMut<GameState>,
 ) {
-    for (interaction, rel_cursor, track) in &interaction_query {
+    for (interaction, btn) in &query {
         if *interaction == Interaction::Pressed {
-            if let Some(pos) = rel_cursor.normalized {
-                let value = pos.x.clamp(0.0, 1.0);
-                match track.0 {
-                    ColorChannel::Red => game_state.player[0] = value,
-                    ColorChannel::Green => game_state.player[1] = value,
-                    ColorChannel::Blue => game_state.player[2] = value,
-                }
-            }
+            let channel = match btn.channel {
+                ColorChannel::Red   => &mut game_state.player[0],
+                ColorChannel::Green => &mut game_state.player[1],
+                ColorChannel::Blue  => &mut game_state.player[2],
+            };
+            *channel = (*channel + btn.delta).clamp(0.0, 1.0);
         }
     }
 }
 
 fn handle_submit_button(
-    interaction_query: Query<&Interaction, (Changed<Interaction>, With<SubmitButton>)>,
+    query: Query<&Interaction, (Changed<Interaction>, With<SubmitButton>)>,
     mut game_state: ResMut<GameState>,
 ) {
-    for interaction in &interaction_query {
+    for interaction in &query {
         if *interaction == Interaction::Pressed && game_state.active {
             let [tr, tg, tb] = game_state.target;
             let [pr, pg, pb] = game_state.player;
@@ -283,9 +266,9 @@ fn update_slider_fills(
     if game_state.is_changed() {
         for (mut node, fill) in &mut query {
             let value = match fill.0 {
-                ColorChannel::Red => game_state.player[0],
+                ColorChannel::Red   => game_state.player[0],
                 ColorChannel::Green => game_state.player[1],
-                ColorChannel::Blue => game_state.player[2],
+                ColorChannel::Blue  => game_state.player[2],
             };
             node.width = Val::Percent(value * 100.0);
         }
