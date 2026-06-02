@@ -3,6 +3,7 @@ use rand::Rng;
 
 const STEP: f32 = 0.05;
 const TOTAL_ROUNDS: u32 = 3;
+const ROUND_TIME: f32 = 30.0;
 const SCORES_FILE: &str = "scores.txt";
 
 fn main() {
@@ -25,13 +26,14 @@ fn main() {
         .add_systems(
             Update,
             (
-                (handle_slider_buttons, handle_submit_button),
+                (handle_slider_buttons, handle_submit_button, tick_timer),
                 (
                     update_target_swatch,
                     update_player_swatch,
                     update_slider_fills,
                     update_score_text,
                     update_round_text,
+                    update_timer_text,
                 ),
             )
                 .chain()
@@ -62,11 +64,12 @@ struct GameState {
     player: [f32; 3],
     total_score: u32,
     round: u32,
+    time_remaining: f32,
 }
 
 impl Default for GameState {
     fn default() -> Self {
-        Self { target: [0.0; 3], player: [0.0; 3], total_score: 0, round: 1 }
+        Self { target: [0.0; 3], player: [0.0; 3], total_score: 0, round: 1, time_remaining: ROUND_TIME }
     }
 }
 
@@ -103,6 +106,7 @@ struct SliderButton { channel: ColorChannel, delta: f32 }
 #[derive(Component)] struct SliderFill(ColorChannel);
 #[derive(Component)] struct ScoreText;
 #[derive(Component)] struct RoundText;
+#[derive(Component)] struct TimerText;
 #[derive(Component)] struct TitleScreen;
 #[derive(Component)] struct GameScreen;
 #[derive(Component)] struct GameOverScreen;
@@ -193,7 +197,7 @@ fn setup_game(mut commands: Commands, mut game_state: ResMut<GameState>) {
             GameScreen,
         ))
         .with_children(|root| {
-            // Round and score header
+            // Round, timer, and score header
             root.spawn(Node {
                 flex_direction: FlexDirection::Row,
                 column_gap: Val::Px(40.0),
@@ -203,6 +207,11 @@ fn setup_game(mut commands: Commands, mut game_state: ResMut<GameState>) {
                 row.spawn((
                     Text::new(format!("Round 1 / {TOTAL_ROUNDS}")),
                     RoundText,
+                ));
+                row.spawn((
+                    Text::new(format!("Time: {ROUND_TIME:.0}s")),
+                    TextColor(Color::WHITE),
+                    TimerText,
                 ));
                 row.spawn((Text::new("Score: 0"), ScoreText));
             });
@@ -322,21 +331,57 @@ fn handle_submit_button(
     mut next_state: ResMut<NextState<AppState>>,
 ) {
     for interaction in &query {
-        if *interaction == Interaction::Pressed {
+        if *interaction == Interaction::Pressed && game_state.time_remaining > 0.0 {
             let [tr, tg, tb] = game_state.target;
             let [pr, pg, pb] = game_state.player;
             let dist = ((tr-pr).powi(2) + (tg-pg).powi(2) + (tb-pb).powi(2)).sqrt();
-            let points = ((1.0 - dist / 3.0_f32.sqrt()) * 1000.0) as u32;
-            game_state.total_score += points;
+            let color_score = (1.0 - dist / 3.0_f32.sqrt()) * 1000.0;
+            let time_ratio = game_state.time_remaining / ROUND_TIME;
+            let points = (color_score * time_ratio) as u32;
+            advance_round(&mut game_state, &mut next_state, points);
+        }
+    }
+}
 
-            if game_state.round >= TOTAL_ROUNDS {
-                next_state.set(AppState::GameOver);
+fn tick_timer(
+    time: Res<Time>,
+    mut game_state: ResMut<GameState>,
+    mut next_state: ResMut<NextState<AppState>>,
+) {
+    if game_state.time_remaining <= 0.0 { return; }
+    game_state.time_remaining -= time.delta_secs();
+    if game_state.time_remaining <= 0.0 {
+        game_state.time_remaining = 0.0;
+        advance_round(&mut game_state, &mut next_state, 0);
+    }
+}
+
+fn advance_round(game_state: &mut GameState, next_state: &mut NextState<AppState>, points: u32) {
+    game_state.total_score += points;
+    if game_state.round >= TOTAL_ROUNDS {
+        next_state.set(AppState::GameOver);
+    } else {
+        game_state.round += 1;
+        let mut rng = rand::rng();
+        game_state.target = [rng.random(), rng.random(), rng.random()];
+        game_state.player = [0.0; 3];
+        game_state.time_remaining = ROUND_TIME;
+    }
+}
+
+fn update_timer_text(
+    gs: Res<GameState>,
+    mut q: Query<(&mut Text, &mut TextColor), With<TimerText>>,
+) {
+    if gs.is_changed() {
+        if let Ok((mut text, mut color)) = q.single_mut() {
+            let secs = gs.time_remaining.ceil() as u32;
+            text.0 = format!("Time: {secs}s");
+            *color = if gs.time_remaining < 10.0 {
+                TextColor(Color::srgb(1.0, 0.3, 0.3))
             } else {
-                game_state.round += 1;
-                let mut rng = rand::rng();
-                game_state.target = [rng.random(), rng.random(), rng.random()];
-                game_state.player = [0.0; 3];
-            }
+                TextColor(Color::WHITE)
+            };
         }
     }
 }
