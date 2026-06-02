@@ -430,13 +430,13 @@ fn setup_game_over(
                 TextFont { font_size: 28.0, ..default() },
             ));
             root.spawn((
-                Text::new("── High Scores ──"),
+                Text::new("-- High Scores --"),
                 TextFont { font_size: 22.0, ..default() },
             ));
 
             for (i, &score) in high_scores.0.iter().enumerate() {
                 let label = if score == new_score && i == high_scores.0.iter().position(|&s| s == new_score).unwrap_or(usize::MAX) {
-                    format!("{}. {} ◄ you", i + 1, score)
+                    format!("{}. {} <-- you", i + 1, score)
                 } else {
                     format!("{}. {}", i + 1, score)
                 };
